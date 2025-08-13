@@ -1,0 +1,81 @@
+//******************************************/
+// Universidad del Valle de Guatemala
+// BE3029 - Electronica Digital 2
+// Keren Gamarro
+// 12/08/2025
+// Proyecto: Parte 1 - Sensor de Temperatura con LM35 y botón
+// MCU: ESP32 dev kit 1.0
+// Version 1 solo muestra el titulo, no reconoce al boton
+//******************************************/
+
+//******************************************/
+// Librerias
+//******************************************/
+#include <Arduino.h>
+#include <stdint.h>
+
+//******************************************/
+// Definiciones
+//******************************************/
+#define LM35_PIN 25        // Pin del sensor de temperatura (ADC)
+#define BOTON_PIN 33       // Pin del botón (pull-up interno)
+#define ADC_RES 4095.0     // Resolución ADC de 12 bits del ESP32
+#define VREF 3.3           // Voltaje de referencia del ESP32
+#define DEBOUNCE_MS 200    // Tiempo de rebote del botón
+
+//******************************************/
+// Prototipos de funciones
+//******************************************/
+float leerTemperatura();
+
+//******************************************/
+// Variables globales
+//******************************************/
+volatile bool leer_temp = false;     // Bandera para indicar lectura
+volatile unsigned long lastPress = 0; // Último tiempo de pulsación
+
+//******************************************/
+// ISRs Rutinas de Interrupcion
+//******************************************/
+void IRAM_ATTR botonISR() {
+  unsigned long tiempoActual = millis();
+  if (tiempoActual - lastPress > DEBOUNCE_MS) {
+    leer_temp = true;
+    lastPress = tiempoActual;
+  }
+}
+
+//******************************************/
+// Configuracion
+//******************************************/
+void setup() {
+  Serial.begin(115200);
+  pinMode(LM35_PIN, INPUT);
+  pinMode(BOTON_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BOTON_PIN), botonISR, FALLING);
+
+  Serial.println("\n===== SENSOR DE TEMPERATURA LM35 =====");
+  Serial.println("Presiona el botón para leer la temperatura");
+  Serial.println("========================================");
+}
+
+//******************************************/
+// Loop Principal
+//******************************************/
+void loop() {
+  if (leer_temp) {
+    leer_temp = false; // Limpia bandera
+    float tempC = leerTemperatura();
+    Serial.printf("Temperatura: %.2f °C\n", tempC);
+  }
+}
+
+//******************************************/
+// Otras funciones
+//******************************************/
+float leerTemperatura() {
+  int adcValue = analogRead(LM35_PIN);          // Lectura ADC
+  float voltaje = (adcValue / ADC_RES) * VREF;  // Convierte a voltaje
+  float tempC = voltaje * 100.0;                // LM35: 10 mV = 0.01 V por °C
+  return tempC;
+}
