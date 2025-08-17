@@ -1,0 +1,104 @@
+//******************************************
+// Universidad del Valle de Guatemala
+// BE3029 - Electronica Digital 2
+// Keren Gamarro
+// 17/08/2025
+// Proyecto 1 - Lectura de temperatura con LM35 y LEDs indicativos
+// MCU: ESP32 dev kit 1.0
+// se probo con algunas variaciones en tinkercard pero se debe probar en el lab
+//******************************************
+
+//******************************************
+// Librerías
+//******************************************
+#include <Arduino.h>
+#include <stdint.h>
+
+//******************************************
+// Definiciones
+//******************************************
+#define LM35_PIN      32   // Pin ADC para LM35
+#define BOTON_PIN     33   // Pin del botón
+#define LED_AMARILLO  18   // Pin LED Amarillo (<22°C)
+#define LED_NARANJA    4   // Pin LED Naranja (22-25°C)
+#define LED_ROJO      15   // Pin LED Rojo (>25°C)
+
+//******************************************
+// Variables globales
+//******************************************
+bool botonPresionado = false;
+float factorCalibracion = 2.09; // Ajuste según pruebas
+
+//******************************************
+// ISRs Rutinas de Interrupción
+//******************************************
+void IRAM_ATTR botonISR() {
+  botonPresionado = true;
+}
+
+//******************************************
+// Configuración
+//******************************************
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(LM35_PIN, INPUT);
+  pinMode(BOTON_PIN, INPUT_PULLUP);
+
+  pinMode(LED_AMARILLO, OUTPUT);
+  pinMode(LED_NARANJA, OUTPUT);
+  pinMode(LED_ROJO, OUTPUT);
+
+  attachInterrupt(digitalPinToInterrupt(BOTON_PIN), botonISR, FALLING);
+
+  Serial.println("Sistema listo. Presiona el botón para leer temperatura...");
+}
+
+//******************************************
+// Loop Principal
+//******************************************
+void loop() {
+  if (botonPresionado) {
+    botonPresionado = false;
+
+    // Promediar varias lecturas ADC para estabilidad
+    long suma = 0;
+    for (int i = 0; i < 50; i++) {
+      suma += analogRead(LM35_PIN);
+      delay(2);
+    }
+    int valorADC = suma / 50;
+
+    // Conversión LM35: 10 mV/°C, 3.3V ADC -> 0–4095
+    float tempC = (valorADC * (3.3 / 4095.0)) * 100.0;
+    tempC = tempC * factorCalibracion; // Ajuste de calibración
+
+    // Mostrar en monitor serial
+    Serial.print("ADC: ");
+    Serial.print(valorADC);
+    Serial.print("  |  Temperatura: ");
+    Serial.print(tempC, 1);
+    Serial.println(" ºC");
+
+    // Apagar todos los LEDs
+    analogWrite(LED_AMARILLO, 0);
+    analogWrite(LED_NARANJA, 0);
+    analogWrite(LED_ROJO, 0);
+
+    // Encender LED según temperatura
+    if (tempC < 22.0) {
+      analogWrite(LED_AMARILLO, 255);
+    } 
+    else if (tempC >= 22.0 && tempC <= 25.0) {
+      analogWrite(LED_NARANJA, 255);
+    } 
+    else {
+      analogWrite(LED_ROJO, 255);
+    }
+  }
+}
+
+//******************************************
+// Otras funciones
+//******************************************
+// (No se requieren funciones adicionales)
