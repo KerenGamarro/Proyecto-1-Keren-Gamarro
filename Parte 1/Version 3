@@ -1,0 +1,84 @@
+//******************************************
+// Universidad del Valle de Guatemala
+// BE3029 - Electronica Digital 2
+// Keren Gamarro
+// 17/08/2025
+// Proyecto 1 - Lectura de temperatura con LM35 y botón
+// MCU: ESP32 dev kit 1.0
+//******************************************
+
+//******************************************
+// Librerías
+//******************************************
+#include <Arduino.h>
+#include <stdint.h>
+
+//******************************************
+// Definiciones
+//******************************************
+#define LM35_PIN   32   // Pin ADC para LM35
+#define BOTON_PIN  33   // Pin del botón
+
+//******************************************
+// Prototipos de funciones
+//******************************************
+
+//******************************************
+// Variables globales
+//******************************************
+bool botonPresionado = false;   // Bandera para detectar botón
+float factorCalibracion = 2.09; // Factor de corrección según pruebas
+
+//******************************************
+// ISRs Rutinas de Interrupción
+//******************************************
+void IRAM_ATTR botonISR() {
+  botonPresionado = true;  // Marca que el botón fue presionado
+}
+
+//******************************************
+// Configuración
+//******************************************
+void setup() {
+  Serial.begin(115200);               // Inicializa comunicación serial
+  pinMode(LM35_PIN, INPUT);           // Pin del LM35 como entrada
+  pinMode(BOTON_PIN, INPUT_PULLUP);   // Botón conectado a GND
+  attachInterrupt(digitalPinToInterrupt(BOTON_PIN), botonISR, FALLING);
+
+  Serial.println("Sistema listo. Presiona el botón para leer temperatura...");
+}
+
+//******************************************
+// Loop Principal
+//******************************************
+void loop() {
+  if (botonPresionado) {
+    botonPresionado = false;  // Resetea bandera
+
+    // Promediar varias lecturas ADC para estabilidad, sino tira o valores muy grandes o muy pequeños
+    long suma = 0;
+    for (int i = 0; i < 50; i++) {
+      suma += analogRead(LM35_PIN);
+      delay(2);
+    }
+    int valorADC = suma / 50; // Promedio de lecturas
+
+    // Mapeo de rango ADC (0-4095) a temperatura (0-330 °C teórico)
+    float tempC = map(valorADC, 0, 4095, 0, 330);
+
+    // Corrección con factor de calibración
+    tempC = tempC * factorCalibracion;
+
+    // Mostrar en monitor serial
+    Serial.print("ADC: ");
+    Serial.print(valorADC);
+    Serial.print("  |  Temperatura: ");
+    Serial.print(tempC, 1);
+    Serial.println(" ºC");
+  }
+}
+
+//******************************************
+// Otras funciones
+//******************************************
+// (No se requieren funciones adicionales para esta parte del proyecto)
