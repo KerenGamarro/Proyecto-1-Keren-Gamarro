@@ -1,0 +1,124 @@
+//******************************************
+// Universidad del Valle de Guatemala
+// BE3029 - Electronica Digital 2
+// Keren Gamarro
+// 17/08/2025
+// Proyecto 1 - Lectura de temperatura con LM35 y botón + LED RGB PWM
+// MCU: ESP32 dev kit 1.0
+// tal vez este bien pero mi casa es muy caliente para probar
+//******************************************
+
+//******************************************
+// Librerías
+//******************************************
+#include <Arduino.h>
+#include <stdint.h>
+
+//******************************************
+// Definiciones
+//******************************************
+#define LM35_PIN   32   // Pin ADC para LM35
+#define BOTON_PIN  33   // Pin del botón
+
+// LEDs por rango de temperatura
+#define LED_AMARILLO 18
+#define LED_NARANJA  4
+#define LED_ROJO     15
+
+// PWM
+#define PWM_CHANNEL_AMARILLO 0
+#define PWM_CHANNEL_NARANJA  1
+#define PWM_CHANNEL_ROJO     2
+#define PWM_FREQ 5000
+#define PWM_RES  8   // 8 bits → 0-255
+
+//******************************************
+// Variables globales
+//******************************************
+bool botonPresionado = false;   // Bandera para detectar botón
+float factorCalibracion = 2.09; // Factor de corrección según pruebas
+float tempC = 0;                // Temperatura global
+
+//******************************************
+// ISRs Rutinas de Interrupción
+//******************************************
+void IRAM_ATTR botonISR() {
+  botonPresionado = true;  // Marca que el botón fue presionado
+}
+
+//******************************************
+// Configuración
+//******************************************
+void setup() {
+  Serial.begin(115200);               // Inicializa comunicación serial
+  pinMode(LM35_PIN, INPUT);           // Pin del LM35 como entrada
+  pinMode(BOTON_PIN, INPUT_PULLUP);   // Botón conectado a GND
+  attachInterrupt(digitalPinToInterrupt(BOTON_PIN), botonISR, FALLING);
+
+  // Configuración PWM para cada LED
+  ledcSetup(PWM_CHANNEL_AMARILLO, PWM_FREQ, PWM_RES);
+  ledcAttachPin(LED_AMARILLO, PWM_CHANNEL_AMARILLO);
+
+  ledcSetup(PWM_CHANNEL_NARANJA, PWM_FREQ, PWM_RES);
+  ledcAttachPin(LED_NARANJA, PWM_CHANNEL_NARANJA);
+
+  ledcSetup(PWM_CHANNEL_ROJO, PWM_FREQ, PWM_RES);
+  ledcAttachPin(LED_ROJO, PWM_CHANNEL_ROJO);
+
+  Serial.println("Sistema listo. Presiona el botón para leer temperatura...");
+}
+
+//******************************************
+// Loop Principal
+//******************************************
+void loop() {
+  if (botonPresionado) {
+    botonPresionado = false;  // Resetea bandera
+
+    // Promediar varias lecturas ADC para estabilidad
+    long suma = 0;
+    for (int i = 0; i < 50; i++) {
+      suma += analogRead(LM35_PIN);
+      delay(2);
+    }
+    int valorADC = suma / 50; // Promedio de lecturas
+
+    // Mapeo de rango ADC (0-4095) a temperatura (0-330 °C teórico)
+    tempC = map(valorADC, 0, 4095, 0, 330);
+
+    // Corrección con factor de calibración
+    tempC = tempC * factorCalibracion;
+
+    // Mostrar en monitor serial
+    Serial.print("ADC: ");
+    Serial.print(valorADC);
+    Serial.print("  |  Temperatura: ");
+    Serial.print(tempC, 1);
+    Serial.println(" ºC");
+
+    // Lógica de LEDs según temperatura
+    if (tempC < 22.0) {
+      // Amarillo (mezcla de Rojo + Verde → LED_AMARILLO)
+      ledcWrite(PWM_CHANNEL_AMARILLO, 200); // Intensidad media
+      ledcWrite(PWM_CHANNEL_NARANJA, 0);
+      ledcWrite(PWM_CHANNEL_ROJO, 0);
+
+    } else if (tempC >= 22.0 && tempC < 25.0) {
+      // Naranja (Rojo fuerte + Verde débil → LED_NARANJA)
+      ledcWrite(PWM_CHANNEL_AMARILLO, 0);
+      ledcWrite(PWM_CHANNEL_NARANJA, 180); 
+      ledcWrite(PWM_CHANNEL_ROJO, 0);
+
+    } else {
+      // Rojo puro
+      ledcWrite(PWM_CHANNEL_AMARILLO, 0);
+      ledcWrite(PWM_CHANNEL_NARANJA, 0);
+      ledcWrite(PWM_CHANNEL_ROJO, 255);
+    }
+  }
+}
+
+//******************************************
+// Otras funciones
+//******************************************
+// (No se requieren funciones adicionales para esta parte del proyecto)
