@@ -5,6 +5,7 @@
 // 19/08/2025
 // Proyecto 1 - Lectura de temperatura con LM35, LEDs y Servo
 // MCU: ESP32 dev kit 1.0
+//en teoria funcionan los limites de temperatura pero se cambiaran a los que tengo en este momento para ver si funcionan
 //******************************************
 
 #include <Arduino.h>
