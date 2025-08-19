@@ -1,0 +1,136 @@
+//******************************************
+// Universidad del Valle de Guatemala
+// BE3029 - Electronica Digital 2
+// Keren Gamarro
+// 19/08/2025
+// Proyecto 1 - Lectura de temperatura con LM35, LEDs y Servo
+// MCU: ESP32 dev kit 1.0
+//en teoria funcionan los umbrales pero no funciona el servo
+//******************************************
+
+#include <Arduino.h>
+#include <stdint.h>
+
+//******************************************
+// Definiciones
+//******************************************
+#define LM35_PIN      32   // Pin ADC para LM35
+#define BOTON_PIN     33   // Pin del botón
+#define LED_AMARILLO  18
+#define LED_NARANJA    4
+#define LED_ROJO      15
+
+#define SERVO_PIN     27
+#define SERVO_CANAL    0
+#define SERVO_FREQ    50
+#define SERVO_RES    16
+
+//******************************************
+// Variables globales
+//******************************************
+bool botonPresionado = false;
+float factorCalibracion = 1.0;
+
+//******************************************
+// ISRs
+//******************************************
+void IRAM_ATTR botonISR() {
+  botonPresionado = true;
+}
+
+//******************************************
+// Función auxiliar: mover servo según semáforo
+//******************************************
+void moverServo(float tempC) {
+  int dutyMin = 1638;  // 0°
+  int dutyMax = 7864;  // 180°
+  float angulo = 0;
+
+  // Zona Amarillo: 15°C–22°C -> 0°–60°
+  if (tempC < 22.0) {
+    angulo = map((int)tempC, 15, 22, 0, 60);
+  }
+  // Zona Naranja: 22°C–25°C -> 60°–120°
+  else if (tempC >= 22.0 && tempC <= 25.0) {
+    angulo = map((int)tempC, 22, 25, 60, 120);
+  }
+  // Zona Rojo: >25°C -> 120°–180°
+  else {
+    angulo = map((int)tempC, 25, 35, 120, 180);  // limite superior 35°C
+  }
+
+  // Limitar ángulo
+  if (angulo < 0) angulo = 0;
+  if (angulo > 180) angulo = 180;
+
+  // Convertir a duty y escribir PWM
+  int duty = map((int)angulo, 0, 180, dutyMin, dutyMax);
+  ledcWrite(SERVO_CANAL, duty);
+
+  Serial.print("Servo en angulo: ");
+  Serial.print(angulo);
+  Serial.println("°");
+}
+
+//******************************************
+// Configuración
+//******************************************
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(LM35_PIN, INPUT);
+  pinMode(BOTON_PIN, INPUT_PULLUP);
+
+  pinMode(LED_AMARILLO, OUTPUT);
+  pinMode(LED_NARANJA, OUTPUT);
+  pinMode(LED_ROJO, OUTPUT);
+
+  ledcSetup(SERVO_CANAL, SERVO_FREQ, SERVO_RES);
+  ledcAttachPin(SERVO_PIN, SERVO_CANAL);
+
+  // Servo en posición inicial 0°
+  ledcWrite(SERVO_CANAL, 1638);
+
+  attachInterrupt(digitalPinToInterrupt(BOTON_PIN), botonISR, FALLING);
+  Serial.println("Sistema listo. Servo en posicion inicial (0°).");
+}
+
+//******************************************
+// Loop Principal
+//******************************************
+void loop() {
+  if (botonPresionado) {
+    botonPresionado = false;
+
+    // Filtrar lecturas ADC
+    long suma = 0;
+    for (int i = 0; i < 50; i++) {
+      suma += analogRead(LM35_PIN);
+      delay(2);
+    }
+    unsigned int valorADC = suma / 50;
+
+    float tempC = (valorADC * (3.3 / 4095.0)) * 100.0;
+    tempC = tempC * factorCalibracion;
+
+    Serial.print("Temperatura filtrada: ");
+    Serial.print(tempC, 1);
+    Serial.println(" ºC");
+
+    // LEDs según rango
+    analogWrite(LED_AMARILLO, 0);
+    analogWrite(LED_NARANJA, 0);
+    analogWrite(LED_ROJO, 0);
+
+    if (tempC < 22.0) {
+      analogWrite(LED_AMARILLO, 255);
+    } else if (tempC >= 22.0 && tempC <= 25.0) {
+      analogWrite(LED_NARANJA, 255);
+    } else {
+      analogWrite(LED_ROJO, 255);
+    }
+
+    // Mover servo
+    moverServo(tempC);
+  }
+}
