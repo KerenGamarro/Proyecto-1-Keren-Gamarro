@@ -1,0 +1,120 @@
+//******************************************
+// Universidad del Valle de Guatemala
+// BE3029 - Electronica Digital 2
+// Keren Gamarro
+// 19/08/2025
+// Proyecto 1 - Lectura de temperatura con LM35, LEDs y Servo
+// Servo se mueve según semáforo de temperatura (sin librería)
+//mide menos de lo que realmente hay pero funciona
+//******************************************
+
+#include <Arduino.h>
+#include <stdint.h>
+
+// Pines
+#define LM35_PIN      32
+#define BOTON_PIN     33
+#define LED_AMARILLO  18
+#define LED_NARANJA    4
+#define LED_ROJO      15
+
+#define SERVO_PIN     27
+#define SERVO_CANAL    0
+#define SERVO_FREQ    50
+#define SERVO_RES    16
+
+// Variables globales
+bool botonPresionado = false;
+float factorCalibracion = 1.0;
+
+// Posiciones del servo para cada zona
+const int servoAmarilloMin = 1638; // 0°
+const int servoAmarilloMax = 3276; // 30°
+const int servoNaranjaMin  = 3277; // 30°
+const int servoNaranjaMax  = 4915; // 90°
+const int servoRojoMin     = 4916; // 90°
+const int servoRojoMax     = 7864; // 180°
+
+// ISR del botón
+void IRAM_ATTR botonISR() {
+  botonPresionado = true;
+}
+
+// Función mover servo según semáforo
+void moverServo(float tempC) {
+  int duty = servoAmarilloMin;
+
+  if (tempC < 22.0) {
+    duty = map((int)tempC, 15, 22, servoAmarilloMin, servoAmarilloMax);
+  } else if (tempC >= 22.0 && tempC <= 25.0) {
+    duty = map((int)tempC, 22, 25, servoNaranjaMin, servoNaranjaMax);
+  } else {
+    duty = map((int)tempC, 25, 35, servoRojoMin, servoRojoMax);
+  }
+
+  if (duty < servoAmarilloMin) duty = servoAmarilloMin;
+  if (duty > servoRojoMax) duty = servoRojoMax;
+
+  ledcWrite(SERVO_CANAL, duty);
+  Serial.print("Servo en duty: ");
+  Serial.println(duty);
+}
+
+// Setup
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(LM35_PIN, INPUT);
+  pinMode(BOTON_PIN, INPUT_PULLUP);
+
+  pinMode(LED_AMARILLO, OUTPUT);
+  pinMode(LED_NARANJA, OUTPUT);
+  pinMode(LED_ROJO, OUTPUT);
+
+  ledcSetup(SERVO_CANAL, SERVO_FREQ, SERVO_RES);
+  ledcAttachPin(SERVO_PIN, SERVO_CANAL);
+
+  // Servo inicial 0°
+  ledcWrite(SERVO_CANAL, servoAmarilloMin);
+
+  attachInterrupt(digitalPinToInterrupt(BOTON_PIN), botonISR, FALLING);
+  Serial.println("Sistema listo. Servo en posición inicial 0°.");
+}
+
+// Loop principal
+void loop() {
+  if (botonPresionado) {
+    botonPresionado = false;
+
+    // Promediar lecturas ADC
+    long suma = 0;
+    for (int i = 0; i < 50; i++) {
+      suma += analogRead(LM35_PIN);
+      delay(2);
+    }
+    unsigned int valorADC = suma / 50;
+
+    float tempC = (valorADC * (5 / 4095.0)) * 100.0;
+    tempC = tempC * factorCalibracion;
+
+    Serial.print("Temperatura filtrada: ");
+    Serial.print(tempC, 1);
+    Serial.println(" ºC");
+
+    // LEDs semáforo
+    analogWrite(LED_AMARILLO, 0);
+    analogWrite(LED_NARANJA, 0);
+    analogWrite(LED_ROJO, 0);
+
+    if (tempC < 22.0) {
+      analogWrite(LED_AMARILLO, 255);
+    } else if (tempC >= 22.0 && tempC <= 25.0) {
+      analogWrite(LED_NARANJA, 255);
+    } else {
+      analogWrite(LED_ROJO, 255);
+    }
+
+    // Mover servo
+    moverServo(tempC);
+  }
+}
