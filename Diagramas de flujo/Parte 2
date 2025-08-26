@@ -1,0 +1,46 @@
+1. **Inicio**
+
+   * Configura pines: sensor, botón, LEDs.
+   * Inicializa comunicación serial.
+   * Configura interrupción del botón.
+   * Muestra mensaje: "Sistema listo. Presiona el botón..."
+
+2. **Verificar botón**
+
+   * ¿Botón presionado?
+
+     * **No:** volver a verificar.
+     * **Sí:** continuar.
+
+3. **Reset de bandera**
+
+   * `botonPresionado = false` (esperar siguiente pulsación).
+
+4. **Leer temperatura**
+
+   * Tomar 50 lecturas del sensor.
+   * Calcular promedio (`valorADC`).
+
+5. **Convertir ADC → Temperatura**
+
+   * Aplicar fórmula de conversión: voltaje → °C.
+   * Multiplicar por factor de calibración.
+
+6. **Aplicar filtro exponencial**
+
+   * Suavizar lectura con EMA (`tempFiltrada`).
+
+7. **Mostrar resultado**
+
+   * Imprimir valor en monitor serial.
+
+8. **Encender LED correspondiente**
+
+   * **Si tempFiltrada < 22°C:** encender LED amarillo.
+   * **Si 22°C ≤ tempFiltrada ≤ 25°C:** encender LED naranja.
+   * **Si tempFiltrada > 25°C:** encender LED rojo.
+
+9. **Volver a inicio**
+
+   * Esperar siguiente pulsación del botón.
+
