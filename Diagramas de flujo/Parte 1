@@ -1,0 +1,21 @@
+# 1 ¿Botón presionado?
+
+Sí: continuar a leer temperatura.
+
+No: volver a verificar el botón.
+
+# 2 Leer temperatura
+
+Promediar varias lecturas para que sea estable.
+
+# 3 Convertir ADC a temperatura
+
+Aplicar factor de calibración para ajustar la lectura.
+
+# 4 Mostrar temperatura
+
+Imprimir en el monitor serial.
+
+# 5 Volver a inicio
+
+Esperar a que el botón sea presionado otra vez.
