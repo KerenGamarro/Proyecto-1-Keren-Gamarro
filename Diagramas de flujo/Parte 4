@@ -1,0 +1,51 @@
+1. **Inicio / Setup**
+
+   * Configura pines: sensor LM35, botón, LEDs, servo, display.
+   * Inicializa PWM del servo.
+   * Configura interrupción del botón.
+   * Lleva servo a posición inicial 0°.
+   * Muestra mensaje "Sistema listo".
+
+2. **Loop principal (se repite siempre)**
+
+   2.1 **Mostrar temperatura en display**
+
+   * Tomar `ultimaTemp`.
+   * Convertir en decenas, unidades y décimas.
+   * Encender cada dígito del display con multiplexeo (3 ms cada uno).
+
+   2.2 **¿Botón presionado?**
+
+   * **No:** regresar a mostrar temperatura en display.
+   * **Sí:** continuar.
+
+   2.3 **Reset de bandera**
+
+   * `botonPresionado = false`.
+
+   2.4 **Leer temperatura**
+
+   * Tomar 50 lecturas del LM35.
+   * Calcular promedio (`valorADC`).
+
+   2.5 **Convertir ADC → temperatura**
+
+   * Aplicar fórmula del LM35 y factor de calibración.
+   * Guardar en `ultimaTemp`.
+
+   2.6 **Mostrar temperatura en monitor serial**
+
+   * Imprimir `tempC`.
+
+   2.7 **Actualizar LEDs semáforo**
+
+   * Apagar todos los LEDs.
+   * **Si temp < 22°C:** LED amarillo.
+   * **Si 22 ≤ temp ≤ 25°C:** LED naranja.
+   * **Si temp > 25°C:** LED rojo.
+
+   2.8 **Mover servo**
+
+   * Mover a ángulo correspondiente según la zona de temperatura.
+
+3. **Volver a paso 2 (loop infinito)**
