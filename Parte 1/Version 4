@@ -1,0 +1,99 @@
+//******************************************
+// Universidad del Valle de Guatemala
+// BE3029 - Electronica Digital 2
+// Keren Gamarro
+// 17/08/2025
+// Proyecto 1 - Lectura de temperatura con LM35 y botón
+// MCU: ESP32 dev kit 1.0
+//******************************************
+
+//******************************************
+// Librerías
+//******************************************
+#include <Arduino.h>     // Librería base para trabajar con Arduino/ESP32
+#include <stdint.h>      // Librería de tipos enteros estándar (uint8_t, int16_t, etc.) esto para una mayor libertad
+
+//******************************************
+// Definiciones
+//******************************************
+#define LM35_PIN   32   // Pin ADC donde se conecta la salida del sensor LM35
+#define BOTON_PIN  33   // Pin digital conectado al botón (usado con interrupción)
+
+//******************************************
+// Prototipos de funciones (no necesarias para esta parte)
+//******************************************
+
+//******************************************
+// Variables globales
+//******************************************
+bool botonPresionado = false;   // Señal para ver si se presiono el boton y leer la temperatura
+float factorCalibracion = 2.09; // Factor para corregir lecturas del LM35, en base a prueba y error 
+
+//******************************************
+// ISRs Rutinas de Interrupción
+//******************************************
+// Se ejecuta la rutina al presionar el botón
+void IRAM_ATTR botonISR() {
+  botonPresionado = true;  // Se manda a llamar en el loop
+}
+
+//******************************************
+// Configuración (se ejecuta una sola vez al iniciar)
+//******************************************
+void setup() {
+  Serial.begin(115200);               // Inicializa comunicación serial a 115200 baudios
+  pinMode(LM35_PIN, INPUT);           // Configura el pin del LM35 como entrada analógica
+  pinMode(BOTON_PIN, INPUT_PULLUP);   // Configura el botón con resistencia interna pull-up, se conecta a tierra física y al pin sin resistencia
+  
+  // Configura interrupción en el botón:
+  // Se llama a botonISR() cuando el botón pasa de HIGH → LOW (flanco de bajada)
+  attachInterrupt(digitalPinToInterrupt(BOTON_PIN), botonISR, FALLING);
+
+  Serial.println("Sistema listo. Presiona el botón para leer temperatura...");
+}
+
+//******************************************
+// Loop Principal (se repite indefinidamente)
+//******************************************
+void loop() {
+  // Verifica si el botón fue presionado
+  if (botonPresionado) {
+    botonPresionado = false;  // Resetea la bandera para esperar la próxima pulsación
+
+    // --- Lectura de temperatura ---
+    // Para evitar ruido en la lectura del ADC, se toman varias muestras
+    // y se promedian, así se obtiene un valor más estable.
+    long suma = 0;
+    for (int i = 0; i < 50; i++) {       // Se hacen 50 lecturas rápidas
+      suma += analogRead(LM35_PIN);      // Suma valores del ADC
+      delay(2);                          // Pequeña pausa entre lecturas
+    }
+    int valorADC = suma / 50;            // Se obtiene el promedio
+
+    // --- Conversión ADC a temperatura ---
+    // El ADC del ESP32 tiene un rango de 0-4095 (12 bits).
+    // Se usa la función map() para convertir este valor a temperatura
+    // asumiendo que 4095 equivale a 330 °C (aprox. máximo del LM35 en teoría).
+    float tempC = map(valorADC, 0, 4095, 0, 330);
+
+    // --- Corrección de calibración ---
+    // Se multiplica la lectura por un factor obtenido experimentalmente
+    // para corregir diferencias reales del sensor o ADC.
+    tempC = tempC * factorCalibracion;
+
+    // --- Mostrar resultados ---
+    // Se imprimen tanto el valor ADC como la temperatura calculada
+    // en el monitor serial, con un decimal de precisión.
+    Serial.print("ADC: ");
+    Serial.print(valorADC);
+    Serial.print("  |  Temperatura: ");
+    Serial.print(tempC, 1);
+    Serial.println(" ºC");
+  }
+}
+
+//******************************************
+// Otras funciones
+//******************************************
+// (En este caso no se necesitan funciones adicionales)
+//******************************************
