@@ -1,0 +1,52 @@
+1. **Inicio**
+
+   * Configura pines: sensor, botón, LEDs, servo.
+   * Inicializa comunicación serial.
+   * Configura interrupción del botón.
+   * Lleva servo a posición inicial 0°.
+   * Muestra mensaje: "Sistema listo. Servo en posición inicial 0°."
+
+2. **Verificar botón**
+
+   * ¿Botón presionado?
+
+     * **No:** volver a verificar.
+     * **Sí:** continuar.
+
+3. **Reset de bandera**
+
+   * `botonPresionado = false`.
+
+4. **Leer temperatura**
+
+   * Tomar 50 lecturas rápidas del sensor.
+   * Calcular promedio (`valorADC`).
+
+5. **Convertir ADC → Temperatura**
+
+   * Aplicar fórmula ADC → °C.
+   * Multiplicar por factor de calibración.
+
+6. **Mostrar temperatura**
+
+   * Imprimir valor en monitor serial.
+
+7. **Apagar LEDs**
+
+   * Todos los LEDs en LOW.
+
+8. **Encender LED correspondiente**
+
+   * **Si tempC < 22°C:** LED amarillo.
+   * **Si 22°C ≤ tempC ≤ 25°C:** LED naranja.
+   * **Si tempC > 25°C:** LED rojo.
+
+9. **Mover servo según zona**
+
+   * **Zona baja:** 0°–30°
+   * **Zona media:** 90°
+   * **Zona alta:** 150°
+
+10. **Volver a inicio**
+
+    * Esperar siguiente pulsación del botón.
