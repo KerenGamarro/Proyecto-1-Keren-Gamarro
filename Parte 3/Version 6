@@ -1,0 +1,135 @@
+//******************************************
+// Universidad del Valle de Guatemala
+// BE3029 - Electronica Digital 2
+// Keren Gamarro
+// 25/08/2025
+// Proyecto 1 - LM35 con servo tipo semáforo
+//******************************************
+
+#include <Arduino.h>
+#include <stdint.h>
+
+//---------------------------
+// Definición de pines
+//---------------------------
+#define LM35_PIN      34   // Pin analógico conectado al sensor LM35
+#define BOTON_PIN     33   // Botón para activar lectura de temperatura
+#define LED_AMARILLO  27   // LED semáforo: zona baja
+#define LED_NARANJA   26   // LED semáforo: zona media
+#define LED_ROJO      25   // LED semáforo: zona alta
+
+// Configuración del servo (usando PWM con LEDC del ESP32)
+#define SERVO_PIN     13   // Pin del servo
+#define SERVO_CANAL    0   // Canal PWM asignado al servo
+#define SERVO_FREQ    50   // Frecuencia de servo (50 Hz típico)
+#define SERVO_RES     16   // Resolución PWM (16 bits)
+
+//---------------------------
+// Variables globales
+//---------------------------
+bool botonPresionado = false;   // Bandera activada por la ISR al presionar el botón
+float factorCalibracion = 1.0;  // Factor de calibración de temperatura
+
+// Ángulos fijos para cada zona del semáforo
+const int servoAmarillo = 30;  // Zona baja (LED amarillo)
+const int servoNaranja  = 90;  // Zona media (LED naranja)
+const int servoRojo     = 150; // Zona alta (LED rojo)
+const int servoMin      = 0;   // Posición inicial (reposo)
+
+//---------------------------
+// Interrupción del botón
+//---------------------------
+void IRAM_ATTR botonISR() {
+  botonPresionado = true; // Marca que el botón fue presionado
+}
+
+//---------------------------
+// Función que mueve el servo
+// según la zona de temperatura
+//---------------------------
+void moverServoPorZona(float tempC) {
+  int duty = 0;
+
+  if (tempC < 22.0) {
+    // Zona baja -> LED amarillo
+    duty = map(servoAmarillo, 0, 180, 1638, 7864);
+  } else if (tempC <= 25.0) {
+    // Zona media -> LED naranja
+    duty = map(servoNaranja, 0, 180, 1638, 7864);
+  } else {
+    // Zona alta -> LED rojo
+    duty = map(servoRojo, 0, 180, 1638, 7864);
+  }
+
+  // Aplica el PWM al servo
+  ledcWrite(SERVO_CANAL, duty);
+
+  // Debug en el monitor serie
+  Serial.print("Servo duty: "); 
+  Serial.println(duty);
+}
+
+//---------------------------
+// Setup (inicialización)
+//---------------------------
+void setup() {
+  Serial.begin(115200); // Comunicación serial para depuración
+
+  // Configuración de pines
+  pinMode(LM35_PIN, INPUT);
+  pinMode(BOTON_PIN, INPUT_PULLUP); // Botón con resistencia pull-up interna
+  pinMode(LED_AMARILLO, OUTPUT);
+  pinMode(LED_NARANJA, OUTPUT);
+  pinMode(LED_ROJO, OUTPUT);
+
+  // Configuración del PWM para el servo
+  ledcSetup(SERVO_CANAL, SERVO_FREQ, SERVO_RES);
+  ledcAttachPin(SERVO_PIN, SERVO_CANAL);
+
+  // Llevar servo a posición inicial (0°)
+  ledcWrite(SERVO_CANAL, map(servoMin, 0, 180, 1638, 7864));
+
+  // Configurar interrupción en el botón (flanco de bajada)
+  attachInterrupt(digitalPinToInterrupt(BOTON_PIN), botonISR, FALLING);
+
+  Serial.println("Sistema listo. Servo en posición inicial 0°.");
+}
+
+//---------------------------
+// Loop principal
+//---------------------------
+void loop() {
+  if (botonPresionado) {   // Si el botón fue presionado
+    botonPresionado = false;
+
+    // Promediar lecturas del ADC para filtrar ruido
+    long suma = 0;
+    for (int i = 0; i < 50; i++) {
+      suma += analogRead(LM35_PIN);
+      delay(2); // Pequeña pausa entre lecturas
+    }
+    unsigned int valorADC = suma / 50;
+
+    // Conversión del valor ADC a temperatura en °C
+    float tempC = (valorADC * (5.0 / 4095.0)) * 100.0;
+    tempC = tempC * factorCalibracion; // Ajuste por calibración
+
+    // Mostrar en monitor serie
+    Serial.print("Temperatura filtrada: ");
+    Serial.print(tempC, 1);
+    Serial.println(" ºC");
+
+    // Apagar todos los LEDs
+    digitalWrite(LED_AMARILLO, LOW);
+    digitalWrite(LED_NARANJA, LOW);
+    digitalWrite(LED_ROJO, LOW);
+
+    // Encender el LED correspondiente según la zona
+    if (tempC < 22.0) digitalWrite(LED_AMARILLO, HIGH);
+    else if (tempC <= 25.0) digitalWrite(LED_NARANJA, HIGH);
+    else digitalWrite(LED_ROJO, HIGH);
+
+    // Mover servo según la zona de temperatura
+    moverServoPorZona(tempC);
+  }
+}
