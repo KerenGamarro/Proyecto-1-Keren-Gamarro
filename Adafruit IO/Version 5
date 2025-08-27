@@ -1,0 +1,320 @@
+//******************************************
+// Universidad del Valle de Guatemala
+// BE3029 - Electronica Digital 2
+// Keren Gamarro
+// 27/08/2025
+// Proyecto 1 - LM35 con servo tipo semáforo + Display 7 segmentos + Adafruit IO
+// Multiplexeo con Timers (display estable sin parpadeo)
+// al cambiar el uso del display con timers ya funciona apropiadamente
+//******************************************
+
+#include <Arduino.h>         // Biblioteca para poder usar arduino
+#include <stdint.h>          // biblioteca para numeros de tipo entero
+#include "WiFi.h"            // WiFi para ESP32
+#include "AdafruitIO_WiFi.h" // Cliente de Adafruit IO para enviar la temperatura
+
+// ---------------------------
+// Adafruit IO (credenciales)
+// ---------------------------
+#define IO_USERNAME  "Keren_Gabriela"
+#define IO_KEY       "io_GBqo77aCGsP0YapYLvDRMRorXhT4" // Clave de Adafruit IO, solo agregar a al inicio
+
+// Nombre y clave de la red, si uso la de la u truena
+#define WIFI_SSID    "Keren Gabriela"
+#define WIFI_PASS    "kaylaythorin04"
+
+// Datos necesarios para que se pueda enviar la información al dashboard de adafruit io
+AdafruitIO_WiFi io(IO_USERNAME, IO_KEY, WIFI_SSID, WIFI_PASS);
+
+//Se manda a llamar el feed donde estoy trabajando
+AdafruitIO_Feed *tempFeed = io.feed("Temperatura");
+
+// ---------------------------
+// Pines LM35 y control
+// ---------------------------
+// LM35_PIN: pin ADC del ESP32 donde está conectado el sensor LM35 (entrega 10 mV/°C).
+// BOTON_PIN: cada botonazo un nuevo registro de temperatura
+// LEDs: indicadores de zona de temperatura (estilo semáforo). En este caso amarillo, naranja y rojo
+#define LM35_PIN      34 //pin apropiado para recibir ADC
+#define BOTON_PIN     33
+#define LED_AMARILLO  27
+#define LED_NARANJA   26
+#define LED_ROJO      25
+
+// ---------------------------
+// Configuración del Servo
+// ---------------------------
+// Se conecta el servo a un pin que pueda usar PWM y se le coloca un canal y frecuencia
+// SERVO_FREQ=50 Hz es el estándar para servos (periodo 20 ms).
+// SERVO_RES=16 bits da un conteo de 0.65535 para mapear el pulso de 1-2 ms.
+#define SERVO_PIN     13
+#define SERVO_CANAL    0
+#define SERVO_FREQ    50
+#define SERVO_RES     16
+
+// ---------------------------
+// Segmentos display 7 seg
+// ---------------------------
+// Nombres de los pines conectados a cada segmento del display (a,b,c,d,e,f,g y el punto decimal P).
+// Los pines DIG1, DIG2 y DIG3 activan el dígito 1, 2 y 3 respectivamente. El display que estoy usando es de catodo comun
+
+#define SEG_A 23
+#define SEG_B 14
+#define SEG_C 18
+#define SEG_D 15
+#define SEG_E 5
+#define SEG_F 12
+#define SEG_G 4
+#define SEG_P 2
+
+#define DIG1 22
+#define DIG2 21
+#define DIG3 19
+
+// ---------------------------
+// Variables globales
+// ---------------------------
+// 'botonPresionado' sirve para modificar el ISR del botón (debe leerse en loop).
+// 'factorCalibracion' para ajustar las lecturas del LM35
+// 'ultimaTemp' almacena la temperatura filtrada con EMA (inicia en 0.0, sube de a pocos).
+// 'alpha' es el peso del dato nuevo en el filtro EMA (0<alpha<=1). 0.1 = suave (90% historia, 10% nuevo).
+bool botonPresionado = false;
+float factorCalibracion = 1.0;
+float ultimaTemp = 0.0;
+float alpha = 0.1;
+
+// Posiciones para el servo en grados
+// Se usan en 'moverServoPorZona' para mapear a un ancho de pulso (via ledcWrite).
+const int servoAmarillo = 30;
+const int servoNaranja  = 90;
+const int servoRojo     = 150;
+const int servoMin      = 0;
+
+// Arreglo para poder encender los segmentos correctos
+// Formato: {a,b,c,d,e,f,g}. 1=segmento encendido, 0=apagado.
+const byte numToSeg[10][7] = {
+  {1,1,1,1,1,1,0}, {0,1,1,0,0,0,0}, {1,1,0,1,1,0,1}, {1,1,1,1,0,0,1},
+  {0,1,1,0,0,1,1}, {1,0,1,1,0,1,1}, {1,0,1,1,1,1,1}, {1,1,1,0,0,0,0},
+  {1,1,1,1,1,1,1}, {1,1,1,1,0,1,1}
+};
+
+// ---------------------------
+// Variables para el display
+// ---------------------------
+// 'hw_timer_t *timer': manejador del timer por hardware del ESP32 (no depende del loop).
+// 'portMUX_TYPE mux': mutex para proteger variables compartidas entre ISR y loop (sección crítica).
+// 'volatile' obliga al compilador a leer del RAM real (no optimizar en registros), vital en ISRs.
+// 'digitoActual': cuál de los 3 dígitos está activo en este instante (0,1,2).
+// 'valoresDisplay[3]': los 3 dígitos a mostrar (decenas, unidades, décimas).
+// 'puntoDecimal[3]': define qué dígito pinta el punto (usamos el del medio).
+hw_timer_t *timer = NULL;
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+volatile int digitoActual = 0;
+volatile int valoresDisplay[3] = {0,0,0};
+volatile bool puntoDecimal[3] = {false,false,false};
+
+// ---------------------------
+// ISR del botón
+// ---------------------------
+// ISR = rutina que se ejecuta al dispararse la interrupción del botón.
+// Se marca la bandera y se sale
+// Se marca 'botonPresionado=true' para que el loop haga el trabajo pesado luego.
+void IRAM_ATTR botonISR() {
+  botonPresionado = true;
+}
+
+// ---------------------------
+// Encender dígito (versión ISR)
+// ---------------------------
+// Escribe el estado de los 7 segmentos + punto decimal para dibujar 'num'.
+// Se usa dentro de la ISR del timer, por eso está marcada IRAM_ATTR (ubicar en IRAM) y es muy ligera.
+void IRAM_ATTR mostrarDigitoISR(int num, bool punto) {
+  digitalWrite(SEG_A, numToSeg[num][0]);
+  digitalWrite(SEG_B, numToSeg[num][1]);
+  digitalWrite(SEG_C, numToSeg[num][2]);
+  digitalWrite(SEG_D, numToSeg[num][3]);
+  digitalWrite(SEG_E, numToSeg[num][4]);
+  digitalWrite(SEG_F, numToSeg[num][5]);
+  digitalWrite(SEG_G, numToSeg[num][6]);
+  digitalWrite(SEG_P, punto ? HIGH : LOW);
+}
+
+// ---------------------------
+// ISR del timer (multiplexeo)
+// ---------------------------
+// Esta ISR se ejecuta periódicamente (cada 2 ms, configurado en setup()).
+// Hace el multiplexeo del display: apaga todos los dígitos, configura los segmentos del dígito que toca,
+// enciende SOLO ese dígito, y avanza al siguiente. Repetido lo bastante rápido, el ojo lo ve estable.
+// Se usan secciones críticas (portENTER/EXIT_CRITICAL_ISR) para evitar condiciones de carrera
+// entre esta ISR y el código del loop que actualiza 'valoresDisplay' y 'puntoDecimal'.
+void IRAM_ATTR onTimer() {
+  portENTER_CRITICAL_ISR(&mux);
+
+  // Apagar todos los dígitos
+  digitalWrite(DIG1, LOW);
+  digitalWrite(DIG2, LOW);
+  digitalWrite(DIG3, LOW);
+
+  // Cargar segmentos para el dígito actual (decenas, unidades o décimas).
+  mostrarDigitoISR(valoresDisplay[digitoActual], puntoDecimal[digitoActual]);
+
+  // Encender el solo dígito que corresponde en esta pasada.
+  if (digitoActual == 0) digitalWrite(DIG1, HIGH);
+  else if (digitoActual == 1) digitalWrite(DIG2, HIGH);
+  else digitalWrite(DIG3, HIGH);
+
+  // Siguiente dígito (0→1→2→0)
+  digitoActual = (digitoActual + 1) % 3;
+
+  portEXIT_CRITICAL_ISR(&mux);
+}
+
+// ---------------------------
+// Actualizar valores del display
+// ---------------------------
+// Convierte un número en °C con una decimal (ej. 24.7) a 3 dígitos:
+// decenas=2, unidades=4, décimas=7. También decide dónde encender el punto decimal
+// (en el dígito de las unidades).
+// Se llama DESDE EL LOOP cuando hay nueva temperatura a mostrar (p.ej., tras presionar el botón).
+void actualizarDisplay(float temp) {
+  int dec  = (int)temp / 10;          // decenas (0..9 para 0..99.9)
+  int uni  = (int)temp % 10;          // unidades (0..9)
+  int deci = (int)(temp * 10) % 10;   // décimas (0..9)
+
+  valoresDisplay[0] = dec;
+  valoresDisplay[1] = uni;
+  valoresDisplay[2] = deci;
+
+  // Punto decimal: encendido en el dígito central (entre unidades y décimas).
+  puntoDecimal[0] = false;
+  puntoDecimal[1] = true;
+  puntoDecimal[2] = false;
+}
+
+// ---------------------------
+// Servo según zona
+// ---------------------------
+// Mueve el servo a uno de tres ángulos (amarillo/naranja/rojo) según la temperatura.
+// Se mapea el ángulo (0-180°) a un 'duty' de 16 bits para 50 Hz.
+// Los valores 1638..7864 corresponden aprox. a pulsos ~0.5..2.4 ms.
+// Se pueden ajustar los limites si quedara desfasado
+void moverServoPorZona(float tempC) {
+  int duty = 0;
+  if (tempC < 22.0) duty = map(servoAmarillo, 0, 180, 1638, 7864);
+  else if (tempC <= 25.0) duty = map(servoNaranja, 0, 180, 1638, 7864);
+  else duty = map(servoRojo, 0, 180, 1638, 7864);
+  ledcWrite(SERVO_CANAL, duty);
+}
+
+// ---------------------------
+// Setup
+// ---------------------------
+// Configura periféricos y arranca el timer del display.
+// inicializa Serial → modos de pines → PWM de servo → ISR botón → Timer → WiFi/Adafruit IO → display=0.0
+void setup() {
+  Serial.begin(115200);
+
+  // Entradas/Salidas
+  pinMode(LM35_PIN, INPUT);          // ADC para LM35
+  pinMode(BOTON_PIN, INPUT_PULLUP);  // Botón a GND con pull-up interno
+  pinMode(LED_AMARILLO, OUTPUT);
+  pinMode(LED_NARANJA, OUTPUT);
+  pinMode(LED_ROJO, OUTPUT);
+
+  pinMode(SEG_A, OUTPUT); pinMode(SEG_B, OUTPUT); pinMode(SEG_C, OUTPUT);
+  pinMode(SEG_D, OUTPUT); pinMode(SEG_E, OUTPUT); pinMode(SEG_F, OUTPUT);
+  pinMode(SEG_G, OUTPUT); pinMode(SEG_P, OUTPUT);
+
+  pinMode(DIG1, OUTPUT); pinMode(DIG2, OUTPUT); pinMode(DIG3, OUTPUT);
+
+  // Servo por LEDC (PWM a 50 Hz, resolución 16 bits)
+  ledcSetup(SERVO_CANAL, SERVO_FREQ, SERVO_RES);
+  ledcAttachPin(SERVO_PIN, SERVO_CANAL);
+  ledcWrite(SERVO_CANAL, map(servoMin, 0, 180, 1638, 7864)); // Posición inicial
+
+  // Interrupción del botón (flanco descendente porque hay PULLUP)
+  attachInterrupt(digitalPinToInterrupt(BOTON_PIN), botonISR, FALLING);
+
+  // Timer por hardware para el display:
+  // timerBegin(timer_num=0, prescaler=80, countUp=true)
+  // - Reloj base de timers en ESP32: 80 MHz.
+  // - Con prescaler=80, queda 1 MHz (1 tick = 1 microsegundo).
+  timer = timerBegin(0, 80, true);          // 1 tick = 1us
+  timerAttachInterrupt(timer, &onTimer, true);
+  timerAlarmWrite(timer, 2000, true);       // Disparo cada 2000 us (2 ms) → ~500 Hz de refresco total
+  timerAlarmEnable(timer);                  // Habilitar alarma (empieza a generar interrupciones)
+
+  // Conexión a Adafruit IO por WiFi (bloqueante hasta conectar)
+  Serial.print("Conectando a Adafruit IO...");
+  io.connect();
+  while(io.status() < AIO_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println(" conectado!");
+
+  // Mostrar 0.0°C al arrancar
+  actualizarDisplay(0.0);
+}
+
+// ---------------------------
+// Loop
+// ---------------------------
+// El loop se mantiene ligero: atiende Adafruit IO, y SOLO cuando detecta que
+// se presionó el botón (bandera de la ISR) realiza la lectura del sensor,
+// filtra con EMA, actualiza LEDs/servo y actualiza el display (las ISRs se
+// encargan del multiplexeo continuo).
+void loop() {
+  io.run(); // Mantiene vivo el cliente de Adafruit IO (maneja pings, reconexiones, etc.)
+
+  if (botonPresionado) {
+    botonPresionado = false; // Consumimos la bandera (evita procesar la misma pulsación más de una vez)
+
+    // -------- Lectura del LM35 con promedio simple --------
+    // Se toman 50 lecturas espaciadas 2 ms para reducir ruido.
+    long suma = 0;
+    for (int i = 0; i < 50; i++) {
+      suma += analogRead(LM35_PIN);
+      delay(2);
+    }
+    unsigned int valorADC = suma / 50; // Promedio (0..4095 para ADC de 12 bits)
+
+    // -------- Conversión ADC → °C --------
+    // LM35 entrega 10 mV/°C. Suponiendo rango ADC 0..3.3V: volt = ADC * (3.3/4095); tempC = volt * 100
+    // Nota: En ESP32 la atenuación del ADC puede afectar el rango útil (por defecto ~1.1V).
+    // Para medir 0..3.3V con precisión, considera usar: analogSetPinAttenuation(LM35_PIN, ADC_11db);
+    float tempC = (valorADC * (3.3 / 4095.0)) * 100.0;
+    tempC = tempC * factorCalibracion; // Corrección fina si notas offset/ganancia
+
+    // -------- Filtro EMA (Exponential Moving Average) --------
+    // Suaviza cambios bruscos. Con alpha=0.1, el 10% viene del valor nuevo y 90% del histórico.
+    // Inicia en 0.0°C, y sube gradualmente
+    ultimaTemp = (alpha * tempC) + ((1 - alpha) * ultimaTemp);
+
+    // Debug por Serial: permite ver el valor filtrado con 1 decimal.
+    Serial.print("Temperatura filtrada: ");
+    Serial.print(ultimaTemp, 1);
+    Serial.println(" ºC");
+
+    // -------- Publicación a Adafruit IO --------
+    // Envía la temperatura filtrada al feed "Temperatura"
+    tempFeed->save(ultimaTemp);
+
+    // -------- Lógica de LEDs por zonas --------
+    // Apagamos todos y luego encendemos según el rango (baja/media/alta).
+    digitalWrite(LED_AMARILLO, LOW);
+    digitalWrite(LED_NARANJA, LOW);
+    digitalWrite(LED_ROJO, LOW);
+    if (ultimaTemp < 22.0)      digitalWrite(LED_AMARILLO, HIGH);
+    else if (ultimaTemp <= 25.0) digitalWrite(LED_NARANJA, HIGH);
+    else                         digitalWrite(LED_ROJO, HIGH);
+
+    // -------- Servo según zona --------
+    // Mueve el brazo a uno de tres ángulos definidos.
+    moverServoPorZona(ultimaTemp);
+
+    // -------- Actualización del display --------
+    // Solo cambiamos los dígitos a mostrar. El "encendido" real lo hace el timer (ISR onTimer()).
+    actualizarDisplay(ultimaTemp);
+  }
+}
