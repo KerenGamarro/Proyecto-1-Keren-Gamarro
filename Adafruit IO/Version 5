@@ -11,7 +11,7 @@
 #include <Arduino.h>         // Biblioteca para poder usar arduino
 #include <stdint.h>          // biblioteca para numeros de tipo entero
 #include "WiFi.h"            // WiFi para ESP32
-#include "AdafruitIO_WiFi.h" // Cliente de Adafruit IO para enviar la temperatura
+#include "AdafruitIO_WiFi.h" // Para poder usar la plataforma
 
 // ---------------------------
 // Adafruit IO (credenciales)
@@ -46,7 +46,7 @@ AdafruitIO_Feed *tempFeed = io.feed("Temperatura");
 // ---------------------------
 // Se conecta el servo a un pin que pueda usar PWM y se le coloca un canal y frecuencia
 // SERVO_FREQ=50 Hz es el estándar para servos (periodo 20 ms).
-// SERVO_RES=16 bits da un conteo de 0.65535 para mapear el pulso de 1-2 ms.
+// SERVO_RES=16 bits da un conteo de 0 a 65535 para mapear el pulso de 1-2 ms.
 #define SERVO_PIN     13
 #define SERVO_CANAL    0
 #define SERVO_FREQ    50
@@ -127,7 +127,7 @@ void IRAM_ATTR botonISR() {
 // Encender dígito (versión ISR)
 // ---------------------------
 // Escribe el estado de los 7 segmentos + punto decimal para dibujar 'num'.
-// Se usa dentro de la ISR del timer, por eso está marcada IRAM_ATTR (ubicar en IRAM) y es muy ligera.
+// Se usa dentro de la ISR del timer, por eso está marcada IRAM_ATTR (ubicar en IRAM)
 void IRAM_ATTR mostrarDigitoISR(int num, bool punto) {
   digitalWrite(SEG_A, numToSeg[num][0]);
   digitalWrite(SEG_B, numToSeg[num][1]);
@@ -196,7 +196,7 @@ void actualizarDisplay(float temp) {
 // ---------------------------
 // Mueve el servo a uno de tres ángulos (amarillo/naranja/rojo) según la temperatura.
 // Se mapea el ángulo (0-180°) a un 'duty' de 16 bits para 50 Hz.
-// Los valores 1638..7864 corresponden aprox. a pulsos ~0.5..2.4 ms.
+// Los valores 1638 a 7864 corresponden aprox. a pulsos 0.5 a 2.4 ms.
 // Se pueden ajustar los limites si quedara desfasado
 void moverServoPorZona(float tempC) {
   int duty = 0;
@@ -216,7 +216,7 @@ void setup() {
 
   // Entradas/Salidas
   pinMode(LM35_PIN, INPUT);          // ADC para LM35
-  pinMode(BOTON_PIN, INPUT_PULLUP);  // Botón a GND con pull-up interno
+  pinMode(BOTON_PIN, INPUT_PULLUP);  // Botón a GND con pull-up interno, conectado directamente al pin
   pinMode(LED_AMARILLO, OUTPUT);
   pinMode(LED_NARANJA, OUTPUT);
   pinMode(LED_ROJO, OUTPUT);
@@ -281,13 +281,11 @@ void loop() {
 
     // -------- Conversión ADC → °C --------
     // LM35 entrega 10 mV/°C. Suponiendo rango ADC 0..3.3V: volt = ADC * (3.3/4095); tempC = volt * 100
-    // Nota: En ESP32 la atenuación del ADC puede afectar el rango útil (por defecto ~1.1V).
-    // Para medir 0..3.3V con precisión, considera usar: analogSetPinAttenuation(LM35_PIN, ADC_11db);
     float tempC = (valorADC * (3.3 / 4095.0)) * 100.0;
     tempC = tempC * factorCalibracion; // Corrección fina si notas offset/ganancia
 
     // -------- Filtro EMA (Exponential Moving Average) --------
-    // Suaviza cambios bruscos. Con alpha=0.1, el 10% viene del valor nuevo y 90% del histórico.
+    // Suaviza cambios bruscos
     // Inicia en 0.0°C, y sube gradualmente
     ultimaTemp = (alpha * tempC) + ((1 - alpha) * ultimaTemp);
 
