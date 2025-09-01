@@ -79,7 +79,7 @@ AdafruitIO_Feed *tempFeed = io.feed("Temperatura");
 // 'ultimaTemp' almacena la temperatura filtrada con EMA (inicia en 0.0, sube de a pocos).
 // 'alpha' es el peso del dato nuevo en el filtro EMA (0<alpha<=1). 0.1 = suave (90% historia, 10% nuevo).
 bool botonPresionado = false;
-float factorCalibracion = 1.0;
+float factorCalibracion = 1.5;
 float ultimaTemp = 0.0;
 float alpha = 0.1;
 
